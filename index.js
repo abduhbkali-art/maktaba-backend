@@ -2,6 +2,8 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cloudinary = require('cloudinary').v2;
 const cors = require('cors');
+const multer = require('multer');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 require('dotenv').config();
 
 const app = express();
@@ -15,51 +17,48 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// الاتصال بـ MongoDB Atlas
+// إعداد مخزن الصور (Multer + Cloudinary)
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'maktaba_products',
+        allowed_formats: ['jpg', 'png', 'jpeg']
+    }
+});
+const upload = multer({ storage: storage });
+
+// الاتصال بـ MongoDB
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log("✅ Connected to MongoDB"))
-    .catch(err => console.error("❌ MongoDB Connection Error:", err));
+    .catch(err => console.error("❌ Error:", err));
 
-// تعريف شكل المنتج في قاعدة البيانات
-const productSchema = new mongoose.Schema({
-    nameAr: String,
-    nameEn: String,
-    price: String,
-    description: String,
-    imageUrl: String,
-    categoryId: Number,
-    createdAt: { type: Date, default: Date.now }
-});
+const Product = mongoose.model('Product', new mongoose.Schema({
+    nameAr: String, nameEn: String, price: String,
+    description: String, imageUrl: String, categoryId: Number
+}));
 
-const Product = mongoose.model('Product', productSchema);
+// --- المسارات ---
 
-// --- المسارات (API Routes) ---
-
-// 1. جلب كل المنتجات
-app.get('/api/products', async (req, res) => {
+// 1. رفع صورة فقط (تعيد لنا رابط الصورة)
+app.post('/api/upload', upload.single('image'), (req, res) => {
     try {
-        const products = await Product.find().sort({ createdAt: -1 });
-        res.json(products);
+        res.json({ imageUrl: req.file.path });
     } catch (err) {
-        res.status(500).json({ message: err.message });
+        res.status(500).json({ error: err.message });
     }
 });
 
-// 2. إضافة منتج جديد
+// 2. إضافة منتج
 app.post('/api/products', async (req, res) => {
-    try {
-        const newProduct = new Product(req.body);
-        const savedProduct = await newProduct.save();
-        res.status(201).json(savedProduct);
-    } catch (err) {
-        res.status(400).json({ message: err.message });
-    }
+    const newProduct = new Product(req.body);
+    await newProduct.save();
+    res.status(201).json(newProduct);
 });
 
-// 3. تجربة السيرفر
-app.get('/', (req, res) => {
-    res.send('Server is running! 🚀');
+// 3. جلب المنتجات
+app.get('/api/products', async (req, res) => {
+    const products = await Product.find().sort({ _id: -1 });
+    res.json(products);
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server is active on port ${PORT}`));
+app.listen(process.env.PORT || 3000, () => console.log('🚀 Server Ready with Image Support!'));
