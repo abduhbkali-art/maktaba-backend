@@ -1,7 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const cloudinary = require('cloudinary').v2;
 const cors = require('cors');
+const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 require('dotenv').config();
@@ -10,6 +10,7 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+// 1. إعدادات Cloudinary لرفع الصور
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -18,46 +19,101 @@ cloudinary.config({
 
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
-    params: { folder: 'maktaba_products', allowed_formats: ['jpg', 'png', 'jpeg'] }
+    params: { 
+        folder: 'maktaba_products',
+        allowed_formats: ['jpg', 'png', 'jpeg']
+    }
 });
 const upload = multer({ storage: storage });
 
-mongoose.connect(process.env.MONGO_URI).then(() => console.log("✅ Connected"));
+// 2. الربط بقاعدة بيانات MongoDB Atlas
+mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log("✅ MongoDB Connected Successfully"))
+    .catch(err => console.error("❌ Connection Error:", err));
 
-// موديل المنتج المطور
-const Product = mongoose.model('Product', new mongoose.Schema({
-    nameAr: String, nameEn: String, price: String, description: String,
-    imageUrl: String, categoryId: Number,
-    colors: [String], types: [String], inStock: { type: Boolean, default: true }
-}));
+// 3. تعريف هيكل المنتجات (Product Schema)
+const productSchema = new mongoose.Schema({
+    nameAr: String,
+    nameEn: String,
+    price: String,
+    description: String,
+    imageUrl: String,
+    categoryId: Number,
+    colors: [String],
+    types: [String],
+    createdAt: { type: Date, default: Date.now }
+});
+const Product = mongoose.model('Product', productSchema);
 
-// موديل الطلبات
-const Order = mongoose.model('Order', new mongoose.Schema({
-    items: Array, totalAmount: String, address: Object,
+// 4. تعريف هيكل الطلبات (Order Schema)
+const orderSchema = new mongoose.Schema({
+    items: Array,
+    totalAmount: String,
+    address: Object,
+    notes: String,
     status: { type: String, default: 'PENDING' },
     createdAt: { type: Date, default: Date.now }
-}));
-
-app.post('/api/upload', upload.single('image'), (req, res) => {
-    res.json({ imageUrl: req.file.path });
 });
+const Order = mongoose.model('Order', orderSchema);
 
-app.post('/api/products', async (req, res) => {
-    const newProduct = new Product(req.body);
-    await newProduct.save();
-    res.status(201).json(newProduct);
-});
+// --- 5. المسارات (API Routes) ---
 
+// جلب جميع المنتجات
 app.get('/api/products', async (req, res) => {
-    const products = await Product.find().sort({ _id: -1 });
-    res.json(products);
+    try {
+        const products = await Product.find().sort({ createdAt: -1 });
+        res.json(products);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-// مسار إرسال طلب جديد
+// إضافة منتج جديد
+app.post('/api/products', async (req, res) => {
+    try {
+        const product = new Product(req.body);
+        await product.save();
+        res.status(201).json(product);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+// حذف منتج عن طريق الـ ID
+app.delete('/api/products/:id', async (req, res) => {
+    try {
+        const result = await Product.findByIdAndDelete(req.params.id);
+        if (!result) return res.status(404).json({ message: "المنتج غير موجود" });
+        res.json({ message: "تم حذف المنتج بنجاح" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// رفع صورة والحصول على الرابط
+app.post('/api/upload', upload.single('image'), (req, res) => {
+    try {
+        res.json({ imageUrl: req.file.path });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// استقبال طلبات الشراء الجديدة
 app.post('/api/orders', async (req, res) => {
-    const newOrder = new Order(req.body);
-    await newOrder.save();
-    res.status(201).json(newOrder);
+    try {
+        const order = new Order(req.body);
+        await order.save();
+        res.status(201).json(order);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
 });
 
-app.listen(process.env.PORT || 3000, () => console.log('🚀 Server Fully Functional!'));
+// اختبار السيرفر
+app.get('/', (req, res) => {
+    res.send('<h1>🚀 Maktaba Backend is Live and Ready!</h1>');
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🚀 Server active on port ${PORT}`));
